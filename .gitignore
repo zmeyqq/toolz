@@ -1,0 +1,9 @@
+*.#*
+*.~*
+*.bak
+*.deb
+*.dsk
+*.sig
+*.scc
+*.orig
+!.gitignore

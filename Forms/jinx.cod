@@ -1,0 +1,228 @@
+﻿class "jinx";
+
+inclass public
+
+  FSource     :String
+
+  #override
+  func Create :Selftype
+    Result = inherited Create
+    Result.Window.Style = Kernel.Window.StackedWindow
+  end
+
+  proc ShowObj(aKey :String; aObject :Object)
+    var vFrm = Create
+    vFrm.FName = aKey
+    vFrm.HeadFrame.Visible = false
+    if aObject is List then
+      var vObj = Storage.Create
+      vObj['#Root'] = aObject
+      vFrm.FObject = vObj
+    else
+      vFrm.FObject = aObject as Storage
+    end
+    vFrm.DrawObject
+    do vFrm.Show(Kernel.Window.StackedWindow)
+  end
+
+inobject private
+
+  FWinWidth :Numeric
+  FName     :String
+  FObject   :Storage := Storage.Create
+
+  HeadFrame :TemplateFrame;
+  BodyFrame :TemplateFrame;
+
+
+  func IsList :Logical
+    Result = FObject.Count = 1 and FObject['#Root'] is List
+  end
+
+
+  proc BlankOnOpen(Create :Logical)
+    if FName = nil then
+      LoadSource
+    else
+      if not Create then
+        -- не восстанавливать "вложенные"
+        Close(cmCancel)
+        return
+      end
+      Window.Caption = FName
+    end
+    var vCell = Template.CellByField['FSource']
+    vCell.ButtonStyle = Template.ComboButton
+    vCell.SetFocus
+  end
+
+
+  func FSourceOnOutput(Cell :TemplateCell; Value :String; Action :Template.OutputTypes; var Format :String) :Variant
+    Result = Value
+    if Action = Template.Output and Value.Length > 300 then
+      Result = Result.Part(1, 300) + '...'
+    end
+  end
+
+  proc FSourceOnExit(Cell :TemplateCell; Index :Integer)
+    LoadSource
+  end
+
+
+  proc LoadSource
+    if not LoadString(FSource) then
+      if ExistFile(FSource) then
+        var vFile = Lib.ReadFileAsStr(FSource)
+        if not LoadString(vFile) then
+          FObject.DeleteAllFields
+        end
+      elsif match(FSource, '*.*/*') then
+        FObject = Lib.GetHttpData(FSource)
+      else
+        FObject.DeleteAllFields
+      end
+    end
+    DrawObject
+  end
+
+  func LoadString(aValue :String) :Logical
+    if match(aValue, '{*}') or match(aValue, '[*]') then
+      FObject.AsString[Storage.JSONFile] = aValue
+      Result = true
+    elsif match(aValue, '<*>') then
+      FObject.AsString[Storage.XMLFile] = aValue
+      Result = true
+    end
+  end
+
+  proc DrawObject
+    FWinWidth = (Window.WidthMM * MainWindow.Width / Window.Width - 10) / 2
+    Template.BeginModify
+    try
+      for var i = BodyFrame.SectionsCount..1 step -1 do
+        BodyFrame.DeleteSection(i)
+      end
+
+      if IsList then
+        var vList = FObject['#Root'] as List
+        if vList.Count = 1 and vList[1] is Storage then
+          DrawStorage(vList[1] as Storage, '[{', '}]')
+        else
+          DrawList(vList)
+        end
+      else
+        DrawStorage(FObject, '{', '}')
+      end
+    finally
+      Template.EndModify
+    end
+  end
+
+  proc DrawStorage(aObject :Object; aLeft, aRight :String)
+    AddBrace(aLeft)
+    for var i = 1..aObject.Count do
+      AddSection(aObject.IndexByNumber[i], aObject.ItemsByNumber[i])
+    end
+    AddBrace(aRight)
+  end
+
+  proc DrawList(aList :List)
+    AddBrace('[')
+    for var i = 1..aList.Count do
+      AddSection(i.Str, aList[i])
+    end
+    AddBrace(']')
+  end
+
+  proc AddSection(aKey :String; aValue :Variant)
+    var vIsObj = aValue is Object
+    var vSec = BodyFrame.AddSection
+    vSec.DefaultCell.TextMargins = [0, 0.5, 0, 0.5]
+    vSec.ColumnsCount = If(vIsObj, 6, 4)
+    SetupFixedCell(vSec, 1, '')
+    SetupFixedCell(vSec, 3, ':')
+    if vIsObj then
+      do SetupCell(vSec, 2, aKey, 100, true, @ObjectOnClick)
+      var vIsList = aValue is List
+      SetupFixedCell(vSec, 4, If(vIsList, '[', '{'))
+      SetupFixedCell(vSec, 6, If(vIsList, ']', '}'))
+      SetupObjCell(vSec, 5, aValue, FWinWidth - vSec.Column[2].Width - 6)
+    else
+      do SetupCell(vSec, 2, aKey, 100, true)
+      var vValue :Variant = If(aValue is String, ToStr(aValue), aValue)
+      do SetupCell(vSec, 4, vValue, FWinWidth - vSec.Column[2].Width, false)
+    end
+  end
+
+  func ObjectOnClick(aCell :TemplateCell; aAction :Template.ClickTypes) :Logical
+    var vKey = aCell.Text
+    if IsList then
+      var vList = FObject['#Root'] as List
+      var vIndex = Int(vKey, 0)
+      if vIndex > 0 then
+        var vName = If(FName = nil, vKey, FName + '[' + vKey + ']')
+        ShowObj(vName, vList[vIndex])
+      elsif vList.Count = 1 then
+        var vObj = vList[1] as Storage
+        ShowObj(vKey, vObj[vKey])
+      end
+    else
+      ShowObj(vKey, FObject[vKey])
+    end
+  end
+
+  func ObjectOnOutput(aCell :TemplateCell; aValue :Variant; aAction :Template.OutputTypes; var Format :String) :Variant
+    Result = aCell.Tag as String
+    if aAction = Template.Output then
+      if Result.Length > 400 then
+        Result = Result.Part(1, 400) + '...'
+      end
+    elsif aAction = Template.Copy then
+      Result = '{' + Result + '}'
+    end
+  end
+
+  proc SetupFixedCell(aSec :TemplateSection; aCol :Integer; aValue :Variant)
+    aSec.Cell[aCol,1].Contents = aValue
+    var vCol = aSec.Column[aCol]
+    vCol.Width = 3
+  end
+
+  func SetupCell(aSec :TemplateSection; aCol :Integer; aValue :Variant; aMaxWidth :Numeric; aBold :Logical; aOnClick :func (aCell :TemplateCell; aAction :Template.ClickTypes) :Logical = nil) :TemplateCell
+    Result = aSec.Cell[aCol,1]
+    Result.Contents  = aValue
+    Result.CanSelect = true
+    Result.Font.Bold = aBold
+    if aOnClick <> nil then
+      Result.OnClick     = aOnClick
+      Result.StaticStyle = Template.StaticButton
+      Result.Alignment   = Template.CenterAlign
+      Result.TabStop     = true
+    end
+    var vWidth = Result.TextWidth + If(aOnClick = nil, 0, 2)
+    if vWidth < 4 then
+      vWidth = 4
+    elsif vWidth > aMaxWidth then
+      vWidth = aMaxWidth
+    end
+    aSec.Column[aCol].Width = vWidth
+  end
+
+  proc SetupObjCell(aSec :TemplateSection; aCol :Integer; aValue :Object; aMaxWidth :Numeric)
+    var vStr = Lib.ItemAsString(aValue).Part(2, -1)
+    var vCell = SetupCell(aSec, aCol, vStr, aMaxWidth, false)
+    vCell.CellType = Template.CalcFieldCell
+    vCell.Tag      = vStr
+    vCell.OnOutput = @ObjectOnOutput
+    vCell.ReadOnly = true
+  end
+
+  proc AddBrace(aBrace :String)
+    var vSec = BodyFrame.AddSection
+    vSec.Column[1].Width = 6
+    var vCell = vSec.Cell[1,1]
+    vCell.Contents  = aBrace
+    vCell.Font.Bold = true
+  end
+
+end

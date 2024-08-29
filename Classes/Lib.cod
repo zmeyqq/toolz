@@ -1,0 +1,57 @@
+﻿class
+
+inclass public
+
+  func ItemAsString(aObj :Variant) :String
+    if aObj is Storage then
+      Result = (aObj as Storage).GetString(Storage.JSONFile, [Storage.XMLSingleRow])
+    elsif aObj is List then
+      var vArray :String[]
+      var vList = aObj as List
+      if vList.Count = 0 then
+        Result = '[]'
+      else
+        for var i = 1..vList.Count do
+          vArray[i] = ItemAsString(vList[i])
+        end
+        Result = If(vList[1] is String, ToStr(vArray), Str(vArray))
+      end
+    else
+      Result = Str(aObj)
+    end
+  end
+
+
+  func ReadFileAsStr(aFile :String; aEncoding :TextFile.Encodings = TextFile.Autodetect) :String
+    var vFile = TextFile.Create(aFile, fmOpenRead, aEncoding)
+    Result = vFile.Read(vFile.Size)
+  end
+
+
+  func GetHttpData(aUrl :String; aHeaders :String[2] = nil) :Storage
+    FHTTP.Headers.DeleteAllFields
+    for var i = 1..LengthOfArray(aHeaders) do
+      FHTTP.Headers[aHeaders[i,1]] = aHeaders[i,2]
+    end
+    var vHttp = FHTTP.Get(aUrl)
+    var vText = vHttp.Binary.GetString(TextFile.UTF8)
+    var vCode = vHttp.Code
+    Result = Storage.Create
+    if vCode >= 200 and vCode < 300 then
+      if vText[1] in ['[', '{'] then
+        Result.AsString = vText
+      else
+        Result.code = vCode
+        Result.http = vText
+      end
+    else
+      Result.code = vCode
+      Result.http = vText
+    end
+  end
+
+inclass private
+
+  var FHTTP      :HTTPClient := HTTPClient.Create
+
+end
